@@ -20,6 +20,7 @@ except Exception as e:
     logger.error(f"Import 경로 설정 실패: {e}")
 
 # FastAPI 및 기본 모듈 import
+FASTAPI_AVAILABLE = False
 try:
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import JSONResponse, StreamingResponse
@@ -87,29 +88,6 @@ def safe_agent_import():
         logger.error(f"MLB 에이전트 모듈 import 실패: {e}")
         return False
 
-# FastAPI 앱 생성
-app = FastAPI(
-    title="MLB 이적 전문 에이전트 API",
-    description="MLB 선수 이적, FA 시장, 팀 전략을 전문적으로 분석하는 AI 에이전트",
-    version="2.0.0"
-)
-
-# CORS 설정
-if FASTAPI_AVAILABLE:
-    try:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        logger.info("CORS 미들웨어 설정 성공")
-    except Exception as e:
-        logger.warning(f"CORS 미들웨어 설정 실패: {e}")
-else:
-    logger.warning("FastAPI를 사용할 수 없어 CORS 미들웨어를 건너뜁니다")
-
 # 에이전트 카드 및 실행기 초기화
 agent_card = None
 agent_executor = None
@@ -174,6 +152,29 @@ def get_agent_executor():
             agent_executor = None
     
     return agent_executor
+
+# FastAPI 앱 생성 - 여기서 FastAPI 클래스가 이미 정의되어 있어야 함
+app = FastAPI(
+    title="MLB 이적 전문 에이전트 API",
+    description="MLB 선수 이적, FA 시장, 팀 전략을 전문적으로 분석하는 AI 에이전트",
+    version="2.0.0"
+)
+
+# CORS 설정
+if FASTAPI_AVAILABLE:
+    try:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        logger.info("CORS 미들웨어 설정 성공")
+    except Exception as e:
+        logger.warning(f"CORS 미들웨어 설정 실패: {e}")
+else:
+    logger.warning("FastAPI를 사용할 수 없어 CORS 미들웨어를 건너뜁니다")
 
 # 앱 시작 시 에이전트 초기화
 if FASTAPI_AVAILABLE:
