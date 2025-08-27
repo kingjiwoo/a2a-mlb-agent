@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "functions": {
+    "api/a2a/*.py": {
+      "runtime": "python3.11"
+    }
+  },
+  "routes": [
+    {
+      "src": "/a2a/(.*)",
+      "dest": "/api/a2a/a2a_handler.py"
+    },
+    {
+      "src": "/",
+      "dest": "/api/a2a/agent_card.py"
+    }
+  ]
+} 
