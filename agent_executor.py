@@ -364,3 +364,14 @@ class MLBTransferAgentExecutor(A2AAgentExecutor):
             logger.error(f"에이전트 실행 중 오류: {e}")
             return f"에이전트 실행 중 오류가 발생했습니다: {str(e)}" 
         
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """에이전트 실행을 취소합니다."""
+        try:
+            logger.info("에이전트 실행 취소 요청됨")
+            # 필요한 정리 작업 수행
+            if hasattr(self.agent, 'cancel'):
+                await self.agent.cancel()
+            logger.info("에이전트 실행 취소 완료")
+        except Exception as e:
+            logger.error(f"에이전트 실행 취소 중 오류: {e}") 
+        
