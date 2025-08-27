@@ -1,21 +1,20 @@
-# Vercel Python Runtime을 위한 의존성 파일
-fastapi>=0.110.0
-uvicorn>=0.30.0
+# 핵심 의존성만 포함
+fastapi>=0.100.0
 pydantic>=2.0.0
 python-multipart>=0.0.6
 
-# MLB 에이전트 관련 의존성
-langchain>=0.2.0
-langchain-anthropic>=0.2.0
-langgraph>=0.2.0
+# MLB 에이전트 핵심
+langchain>=0.1.0
+langchain-anthropic>=0.1.0
+langgraph>=0.1.0
 anthropic>=0.25.0
 
-# MCP 관련 의존성
+# MCP 관련 의존성 (중요!)
+langchain-mcp-adapters>=0.1.0
 mcp>=1.0.0
 
 # A2A 관련 의존성
 a2a-sdk>=0.1.0
 
-# 기타 유틸리티
-httpx>=0.27.0
-aiohttp>=3.9.0 
+# 유틸리티
+httpx>=0.25.0 
