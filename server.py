@@ -104,8 +104,17 @@ def main():
     
     # 서버 필드 및 실행
     app = server.build()
-    uvicorn.run(app, host=host, port=port, timeout_keep_alive=60)
+    
+    # Vercel 배포 시에는 uvicorn.run() 제거
+    # 로컬 테스트 시에만 실행
+    if __name__ == "__main__":
+        uvicorn.run(app, host=host, port=port, timeout_keep_alive=60)
+    
+    return app
 
+# Vercel이 인식하는 ASGI 앱 객체
+app = main()
 
 if __name__ == "__main__":
-    main()
+    # 로컬 테스트용
+    pass
