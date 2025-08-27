@@ -19,23 +19,63 @@ try:
 except Exception as e:
     logger.error(f"Import 경로 설정 실패: {e}")
 
-# 안전한 import를 위한 함수
-def safe_import():
-    """필요한 모듈들을 안전하게 import합니다."""
-    try:
-        from fastapi import FastAPI, HTTPException
-        from fastapi.responses import JSONResponse, StreamingResponse
-        from fastapi.middleware.cors import CORSMiddleware
-        import asyncio
-        import json
-        from typing import Dict, Any, Optional
-        
-        logger.info("FastAPI 및 기본 모듈 import 성공")
-        return True
-    except ImportError as e:
-        logger.error(f"기본 모듈 import 실패: {e}")
-        return False
+# FastAPI 및 기본 모듈 import
+try:
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import JSONResponse, StreamingResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    import asyncio
+    import json
+    from typing import Dict, Any, Optional
+    logger.info("FastAPI 및 기본 모듈 import 성공")
+    FASTAPI_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"기본 모듈 import 실패: {e}")
+    FASTAPI_AVAILABLE = False
+    
+    # FastAPI가 없으면 간단한 대체 객체 생성
+    class FastAPI:
+        def __init__(self, **kwargs):
+            self.title = kwargs.get('title', 'MLB Agent API')
+            self.description = kwargs.get('description', 'MLB Agent API')
+            self.version = kwargs.get('version', '2.0.0')
+            self.routes = []
+            
+        def add_middleware(self, *args, **kwargs):
+            pass
+            
+        def on_event(self, event_type):
+            def decorator(func):
+                return func
+            return decorator
+            
+        def get(self, path):
+            def decorator(func):
+                self.routes.append(('GET', path, func))
+                return func
+            return decorator
+            
+        def post(self, path):
+            def decorator(func):
+                self.routes.append(('POST', path, func))
+                return func
+            return decorator
+    
+    class HTTPException(Exception):
+        def __init__(self, status_code, detail):
+            self.status_code = status_code
+            self.detail = detail
+    
+    class JSONResponse:
+        def __init__(self, status_code, content):
+            self.status_code = status_code
+            self.content = content
+    
+    class CORSMiddleware:
+        def __init__(self, *args, **kwargs):
+            pass
 
+# 안전한 import를 위한 함수
 def safe_agent_import():
     """MLB 에이전트 관련 모듈을 안전하게 import합니다."""
     try:
@@ -55,13 +95,20 @@ app = FastAPI(
 )
 
 # CORS 설정
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if FASTAPI_AVAILABLE:
+    try:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        logger.info("CORS 미들웨어 설정 성공")
+    except Exception as e:
+        logger.warning(f"CORS 미들웨어 설정 실패: {e}")
+else:
+    logger.warning("FastAPI를 사용할 수 없어 CORS 미들웨어를 건너뜁니다")
 
 # 에이전트 카드 및 실행기 초기화
 agent_card = None
@@ -79,20 +126,32 @@ def initialize_agent():
             return True
         else:
             # 기본 에이전트 카드 생성
-            from a2a.types import AgentCard, AgentSkill, AgentCapabilities
-            agent_card = AgentCard(
-                name="MLB 이적 전문 에이전트 (제한 모드)",
-                description="MLB 이적 전문 에이전트입니다. 현재 제한된 기능으로 운영 중입니다.",
-                url="https://vercel.app/",
-                version="2.0.0",
-                default_input_modes=["text"],
-                default_output_modes=["text"],
-                capabilities=AgentCapabilities(streamable=True),
-                skills=[],
-                supports_authenticated_extended_card=False,
-            )
-            logger.info("기본 에이전트 카드 생성 성공")
-            return True
+            try:
+                from a2a.types import AgentCard, AgentSkill, AgentCapabilities
+                agent_card = AgentCard(
+                    name="MLB 이적 전문 에이전트 (제한 모드)",
+                    description="MLB 이적 전문 에이전트입니다. 현재 제한된 기능으로 운영 중입니다.",
+                    url="https://vercel.app/",
+                    version="2.0.0",
+                    default_input_modes=["text"],
+                    default_output_modes=["text"],
+                    capabilities=AgentCapabilities(streamable=True),
+                    skills=[],
+                    supports_authenticated_extended_card=False,
+                )
+                logger.info("기본 에이전트 카드 생성 성공")
+                return True
+            except ImportError:
+                # a2a 모듈도 없으면 딕셔너리로 생성
+                agent_card = {
+                    "name": "MLB 이적 전문 에이전트 (제한 모드)",
+                    "description": "MLB 이적 전문 에이전트입니다. 현재 제한된 기능으로 운영 중입니다.",
+                    "url": "https://vercel.app/",
+                    "version": "2.0.0",
+                    "skills": []
+                }
+                logger.info("딕셔너리 에이전트 카드 생성 성공")
+                return True
     except Exception as e:
         logger.error(f"에이전트 초기화 실패: {e}")
         return False
@@ -117,25 +176,42 @@ def get_agent_executor():
     return agent_executor
 
 # 앱 시작 시 에이전트 초기화
-@app.on_event("startup")
-async def startup_event():
-    """앱 시작 시 실행되는 이벤트"""
-    logger.info("MLB 이적 전문 에이전트 API 시작 중...")
+if FASTAPI_AVAILABLE:
+    try:
+        @app.on_event("startup")
+        async def startup_event():
+            """앱 시작 시 실행되는 이벤트"""
+            logger.info("MLB 이적 전문 에이전트 API 시작 중...")
+            initialize_agent()
+            logger.info("MLB 이적 전문 에이전트 API 시작 완료")
+    except Exception as e:
+        logger.warning(f"startup 이벤트 설정 실패: {e}")
+else:
+    # FastAPI가 없으면 즉시 초기화
+    logger.info("FastAPI 없이 즉시 에이전트 초기화")
     initialize_agent()
-    logger.info("MLB 이적 전문 에이전트 API 시작 완료")
 
 @app.get("/")
 async def root():
     """루트 엔드포인트 - 에이전트 정보 반환"""
     try:
         if agent_card:
-            return {
-                "name": agent_card.name,
-                "description": agent_card.description,
-                "version": agent_card.version,
-                "skills": [skill.name for skill in agent_card.skills] if hasattr(agent_card, 'skills') else [],
-                "status": "running"
-            }
+            if isinstance(agent_card, dict):
+                return {
+                    "name": agent_card.get("name", "MLB 이적 전문 에이전트"),
+                    "description": agent_card.get("description", "서비스 초기화 중입니다."),
+                    "version": agent_card.get("version", "2.0.0"),
+                    "skills": agent_card.get("skills", []),
+                    "status": "running"
+                }
+            else:
+                return {
+                    "name": agent_card.name,
+                    "description": agent_card.description,
+                    "version": agent_card.version,
+                    "skills": [skill.name for skill in agent_card.skills] if hasattr(agent_card, 'skills') else [],
+                    "status": "running"
+                }
         else:
             return {
                 "name": "MLB 이적 전문 에이전트",
@@ -156,7 +232,10 @@ async def get_agent_card():
     """에이전트 카드 정보를 반환합니다 (A2A 프로토콜 표준)"""
     try:
         if agent_card:
-            return agent_card.dict() if hasattr(agent_card, 'dict') else agent_card
+            if isinstance(agent_card, dict):
+                return agent_card
+            else:
+                return agent_card.dict() if hasattr(agent_card, 'dict') else agent_card
         else:
             raise HTTPException(status_code=503, detail="에이전트가 아직 초기화되지 않았습니다")
     except Exception as e:
@@ -168,7 +247,10 @@ async def get_agent_card_api():
     """에이전트 카드 정보를 API 형태로 반환합니다"""
     try:
         if agent_card:
-            return agent_card.dict() if hasattr(agent_card, 'dict') else agent_card
+            if isinstance(agent_card, dict):
+                return agent_card
+            else:
+                return agent_card.dict() if hasattr(agent_card, 'dict') else agent_card
         else:
             raise HTTPException(status_code=503, detail="에이전트가 아직 초기화되지 않았습니다")
     except Exception as e:
@@ -179,21 +261,27 @@ async def get_agent_card_api():
 async def get_agent_skills():
     """에이전트가 지원하는 스킬 목록을 반환합니다"""
     try:
-        if agent_card and hasattr(agent_card, 'skills'):
-            return {
-                "skills": [
-                    {
-                        "id": skill.id,
-                        "name": skill.name,
-                        "description": skill.description,
-                        "tags": skill.tags,
-                        "examples": skill.examples
-                    }
-                    for skill in agent_card.skills
-                ]
-            }
+        if agent_card:
+            if isinstance(agent_card, dict):
+                skills = agent_card.get("skills", [])
+                return {"skills": skills}
+            elif hasattr(agent_card, 'skills'):
+                return {
+                    "skills": [
+                        {
+                            "id": skill.id,
+                            "name": skill.name,
+                            "description": skill.description,
+                            "tags": skill.tags,
+                            "examples": skill.examples
+                        }
+                        for skill in agent_card.skills
+                    ]
+                }
+            else:
+                return {"skills": [], "message": "스킬 정보를 불러올 수 없습니다"}
         else:
-            return {"skills": [], "message": "스킬 정보를 불러올 수 없습니다"}
+            return {"skills": [], "message": "에이전트가 초기화되지 않았습니다"}
     except Exception as e:
         logger.error(f"스킬 목록 반환 오류: {e}")
         return {"skills": [], "error": str(e)}
@@ -294,7 +382,8 @@ async def health_check():
             "status": "healthy",
             "service": "MLB 이적 전문 에이전트",
             "version": "2.0.0",
-            "agent_initialized": agent_card is not None
+            "agent_initialized": agent_card is not None,
+            "fastapi_available": FASTAPI_AVAILABLE
         }
     except Exception as e:
         logger.error(f"헬스 체크 오류: {e}")
@@ -332,7 +421,8 @@ async def test_endpoint():
     return {
         "message": "API가 정상적으로 작동합니다!",
         "status": "success",
-        "timestamp": "2024-01-01T00:00:00Z"
+        "timestamp": "2024-01-01T00:00:00Z",
+        "fastapi_available": FASTAPI_AVAILABLE
     }
 
 @app.get("/api/debug")
@@ -344,8 +434,8 @@ async def debug_info():
             "agent_card_initialized": agent_card is not None,
             "agent_executor_initialized": agent_executor is not None,
             "import_status": {
-                "fastapi": safe_import(),
-                "agent_modules": safe_agent_import()
+                "agent_modules": safe_agent_import(),
+                "fastapi_available": FASTAPI_AVAILABLE
             },
             "python_version": sys.version,
             "sys_path": str(sys.path)
@@ -359,5 +449,8 @@ async def debug_info():
 # Vercel이 인식하는 ASGI/WGSI 엔트리포인트
 # 이 변수가 있어야 Vercel Python Runtime이 인식합니다
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    try:
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    except ImportError:
+        print("uvicorn이 설치되지 않았습니다. pip install uvicorn으로 설치해주세요.") 
