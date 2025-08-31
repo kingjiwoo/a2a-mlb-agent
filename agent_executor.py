@@ -265,6 +265,18 @@ class MLBTransferAgent:
 
     async def invoke(self, user_message: str) -> str:
         """사용자 메시지를 처리하고 응답을 반환합니다."""
+        import asyncio
+        coro = self.agent.ainvoke(
+            {"messages": [("user", enhanced_message)]}
+        )
+        self._extract_user_text = asyncio.create_task(coro)
+        try:
+            response = await self._current_task
+        finally:
+            self._current_task = None
+        result = response["messages"][-1].content
+        return result
+
         try:
             # 에이전트 초기화
             await self._initialize_agent()
@@ -311,6 +323,10 @@ class MLBTransferAgent:
             
             return error_msg
 
+    async def cancel(self):
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+
     def _enhance_message_with_prompt(self, user_message: str) -> str:
         """사용자 메시지에 적절한 프롬프트를 추가합니다."""
         # 시스템 프롬프트로 시작
@@ -348,21 +364,45 @@ class MLBTransferAgentExecutor(A2AAgentExecutor):
     def __init__(self):
         super().__init__()
         self.agent = MLBTransferAgent()
+
+    def _extract_user_text(self, context: RequestContext) -> str:
+        """A2A RequestContext에서 user 텍스트를 안전하게 추출"""
+        # 1) 권장: context.message.parts 에서 {kind:"text"} 찾기
+        msg = getattr(context, "message", None)
+        if msg and getattr(msg, "parts", None):
+            for p in msg.parts or []:
+                # dict or object 모두 대응
+                kind = getattr(p, "kind", None) if not isinstance(p, dict) else p.get("kind")
+                if kind == "text":
+                    text = getattr(p, "text", None) if not isinstance(p, dict) else p.get("text")
+                    if text:
+                        return text
+        # 2) fallback: message.content (혹시 문자열이면)
+        if msg and isinstance(getattr(msg, "content", None), str):
+            return msg.content
+        # 3) 최후: raw request(dict) 경로로 파싱
+        req = getattr(context, "request", None)
+        try:
+            params = req.get("params") or {}
+            parts = (params.get("message") or {}).get("parts") or []
+            for p in parts:
+                if p.get("kind") == "text" and p.get("text"):
+                    return p["text"]
+        except Exception:
+            pass
+        return "안녕하세요"
     
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> str:
         """에이전트를 실행합니다."""
         try:
-            # 사용자 메시지 추출
-            user_message = context.messages[-1].content if context.messages else "안녕하세요"
+            user_text = self._extract_user_text(context)
             
-            # 에이전트 실행
-            response = await self.agent.invoke(user_message)
+            result_text = await self.agent.invoke(user_text)
             
-            return response
-            
+            return new_agent_text_message(result_text)
         except Exception as e:
             logger.error(f"에이전트 실행 중 오류: {e}")
-            return f"에이전트 실행 중 오류가 발생했습니다: {str(e)}" 
+            return new_agent_text_message(f"에이전트 실행 중 오류가 발생했습니다: {str(e)}")
         
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """에이전트 실행을 취소합니다."""
