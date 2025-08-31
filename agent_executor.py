@@ -194,7 +194,8 @@ class MLBTransferAgent:
         return prompts
 
     async def _initialize_agent(self):
-        """MCP 툴 로드 + create_react_agent 생성(항상 self.agent 보장)"""+        if self.agent is not None:
+        """MCP 툴 로드 + create_react_agent 생성(항상 self.agent 보장)"""
+        if self.agent is not None:
             return
         async with self._init_lock:
             if self.agent is not None:  # 다른 코루틴이 먼저 만들었으면 종료
@@ -255,18 +256,6 @@ class MLBTransferAgent:
 
     async def invoke(self, user_message: str) -> str:
         """사용자 메시지를 처리하고 응답을 반환합니다."""
-        import asyncio
-        coro = self.agent.ainvoke(
-            {"messages": [("user", enhanced_message)]}
-        )
-        self._extract_user_text = asyncio.create_task(coro)
-        try:
-            response = await self._current_task
-        finally:
-            self._current_task = None
-        result = response["messages"][-1].content
-        return result
-
         try:
             # 에이전트 초기화
             await self._initialize_agent()
@@ -316,8 +305,15 @@ class MLBTransferAgent:
             return error_msg
 
     async def cancel(self):
-        if self._current_task and not self._current_task.done():
-            self._current_task.cancel()
+        """에이전트 실행을 취소합니다."""
+        try:
+            logger.info("에이전트 실행 취소 요청됨")
+            # 필요한 정리 작업 수행
+            if hasattr(self.agent, 'cancel'):
+                await self.agent.cancel()
+            logger.info("에이전트 실행 취소 완료")
+        except Exception as e:
+            logger.error(f"에이전트 실행 취소 중 오류: {e}")
 
     def _enhance_message_with_prompt(self, user_message: str) -> str:
         """사용자 메시지에 적절한 프롬프트를 추가합니다."""
