@@ -16,6 +16,8 @@ try:
     from a2a.server.request_handlers import DefaultRequestHandler
     from a2a.server.tasks import InMemoryTaskStore
     from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+    from agent_executor import MLBTransferAgentExecutor
+    import os
     
     def create_agent_card() -> AgentCard:
         """MLB 이적 전문 에이전트 카드를 만드는 함수"""
@@ -85,12 +87,19 @@ try:
         )
         return agent_card
 
-    # 에이전트 카드 생성
     agent_card = create_agent_card()
     
-    # 기본 요청 핸들러 생성 (에이전트 실행기 없이)
+    try:
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise RuntimeError("Missing ANTHROPIC_API_KEY")
+        from agent_executor import MLBTransferAgentExecutor
+        executor = MLBTransferAgentExecutor()
+    except Exception as e:
+        executor = None
+        print(f"⚠️ Agent executor disabled: {e}")
+
     request_handler = DefaultRequestHandler(
-        agent_executor=None,  # 일단 None으로 설정
+        agent_executor=executor,
         task_store=InMemoryTaskStore(),
     )
 
