@@ -63,4 +63,46 @@ def create_agent_card() -> AgentCard:
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streamable=True),
         skills=[
-            transfer_anal_
+            transfer_analysis_skill,
+            career_consulting_skill,
+            fan_communication_skill,
+            value_assessment_skill,
+        ],
+        supports_authenticated_extended_card=False,
+    )
+
+
+def build_a2a_app():
+    # 필수 ENV 없으면 빨리 실패하여 원인 명확화
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise RuntimeError("Missing ANTHROPIC_API_KEY")
+    agent_card = create_agent_card()
+    executor = MLBTransferAgentExecutor()  # 실패 시 예외 발생 → except로 폴백
+    handler = DefaultRequestHandler(agent_executor=executor, task_store=InMemoryTaskStore())
+    server = A2AFastAPIApplication(agent_card=agent_card, http_handler=handler)
+    app = server.build()
+    logger.info("✅ A2A app built (executor attached)")
+    return app
+
+
+# ---- 모듈 레벨에서 앱 생성 (Vercel은 module-level 'app'을 찾음) ----
+try:
+    app = build_a2a_app()
+except Exception as e:
+    logger.exception(f"A2A app build failed, falling back to FastAPI: {e}")
+    from fastapi import FastAPI
+
+    app = FastAPI(
+        title="MLB 이적 전문 에이전트 API (Fallback)",
+        description="A2A 빌드 실패로 제한 모드",
+        version="2.0.0",
+    )
+
+    @app.get("/")
+    async def root():
+        return {"message": "MLB Agent API (Fallback Mode)", "status": "limited"}
+
+    @app.get("/.well-known/agent.json")
+    async def agent_json():
+        # 최소 카드 형태라도 노출
+        return {"name": "MLB 이적 전문 에이전트", "status": "fallback"}
