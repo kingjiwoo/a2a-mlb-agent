@@ -349,7 +349,7 @@ class MLBTransferAgentExecutor(A2AAgentExecutor):
         super().__init__()
         self.agent = MLBTransferAgent()
     
-    async def execute(self, context: RequestContext) -> str:
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> str:
         """에이전트를 실행합니다."""
         try:
             # 사용자 메시지 추출
