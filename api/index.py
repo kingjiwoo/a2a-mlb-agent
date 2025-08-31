@@ -111,6 +111,7 @@ try:
     )
 
     # A2A FastAPI 애플리케이션 생성
+    
     try:
         server = A2AFastAPIApplication(
             agent_card=agent_card,
