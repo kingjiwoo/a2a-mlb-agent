@@ -205,13 +205,33 @@ class MLBTransferAgent:
                 logger.info("MCP 연결 및 툴 로드 시작...")
                 # 연결 (너무 오래 붙잡지 않도록 짧은 타임아웃)
                 try:
-                    await asyncio.wait_for(self.mcp_client.connect_all(), timeout=2.0)
+                    # MultiServerMCPClient의 올바른 연결 메서드 사용
+                    if hasattr(self.mcp_client, 'connect_all'):
+                        await asyncio.wait_for(self.mcp_client.connect_all(), timeout=2.0)
+                    elif hasattr(self.mcp_client, 'connect'):
+                        await asyncio.wait_for(self.mcp_client.connect(), timeout=2.0)
+                    else:
+                        logger.warning("MCP 클라이언트에 연결 메서드가 없습니다")
+                        self.tools = []
+                        return
                 except Exception as ce:
                     logger.warning(f"MCP 연결 실패(무시하고 툴 없이 진행): {ce}")
                     self.tools = []
-                else:
-                    raw_tools = await self.mcp_client.get_tools()
+                    return
+                
+                # 툴 가져오기
+                try:
+                    if hasattr(self.mcp_client, 'get_tools'):
+                        raw_tools = await self.mcp_client.get_tools()
+                    elif hasattr(self.mcp_client, 'list_tools'):
+                        raw_tools = await self.mcp_client.list_tools()
+                    else:
+                        logger.warning("MCP 클라이언트에 툴 조회 메서드가 없습니다")
+                        self.tools = []
+                        return
+                        
                     logger.info(f"원시 MCP 툴 {len(raw_tools) if hasattr(raw_tools,'__len__') else 'N/A'}개 발견")
+                    
                     # dict/list 모두 허용 → dict로 정규화
                     if isinstance(raw_tools, list):
                         tools_dict = {}
@@ -219,6 +239,7 @@ class MLBTransferAgent:
                             name = getattr(tool, "name", f"tool_{i}")
                             tools_dict[name] = tool
                         raw_tools = tools_dict
+                    
                     # 래핑
                     wrapped = []
                     for tool_name, mcp_tool in (raw_tools or {}).items():
@@ -229,6 +250,11 @@ class MLBTransferAgent:
                             except Exception as we:
                                 logger.warning(f"툴 {tool_name} 래핑 실패: {we}")
                     self.tools = wrapped
+                    
+                except Exception as e:
+                    logger.error(f"툴 로드 중 오류: {e}")
+                    self.tools = []
+                    
             except Exception as e:
                 logger.error(f"에이전트 초기화 중 오류(툴 없이 진행): {e}")
                 self.tools = []

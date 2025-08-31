@@ -5,8 +5,13 @@ Vercel Python Runtime을 위한 MLB 이적 전문 에이전트 API 엔트리포�
 """
 
 import sys
+import logging
 from pathlib import Path
 import os
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 프로젝트 루트 import 경로 보정
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -88,49 +93,61 @@ try:
         )
         return agent_card
 
+    # 에이전트 카드 생성
     agent_card = create_agent_card()
     
-    executor = MLBTransferAgentExecutor()
+    # 기본 요청 핸들러 생성 (에이전트 실행기 없이)
+    try:
+        from agent_executor import MLBTransferAgentExecutor
+        executor = MLBTransferAgentExecutor()
+        logger.info("MLB 에이전트 실행기 생성 성공")
+    except Exception as e:
+        logger.warning(f"MLB 에이전트 실행기 생성 실패: {e}")
+        executor = None
     
-
     request_handler = DefaultRequestHandler(
-        agent_executor=executor,
+        agent_executor=executor,  # 에이전트 실행기 설정
         task_store=InMemoryTaskStore(),
     )
 
     # A2A FastAPI 애플리케이션 생성
-    server = A2AFastAPIApplication(
-        agent_card=agent_card,
-        http_handler=request_handler
-    )
-    
-    # 서버 빌드
-    app = server.build()
-    
-    print("✅ A2A 서버 직접 생성 성공")
-    
-except ImportError as e:
-    print(f"❌ A2A 모듈 import 실패: {e}")
-    # fallback: 간단한 FastAPI 앱 생성
     try:
-        from fastapi import FastAPI
-        app = FastAPI(
-            title="MLB 이적 전문 에이전트 API (Fallback)",
-            description="MLB 이적 전문 에이전트입니다",
-            version="2.0.0"
+        server = A2AFastAPIApplication(
+            agent_card=agent_card,
+            http_handler=request_handler
         )
         
-        @app.get("/")
-        async def root():
-            return {"message": "MLB Agent API (Fallback Mode)", "status": "limited"}
+        # 서버 빌드
+        app = server.build()
+        
+        logger.info("✅ A2A 서버 직접 생성 성공")
+        
+    except Exception as e:
+        logger.error(f"A2A 서버 생성 실패: {e}")
+        logger.info("Fallback 모드로 전환합니다...")
+        
+        # Fallback: 기본 FastAPI 앱 생성
+        try:
+            from fastapi import FastAPI
+            app = FastAPI(
+                title="MLB 이적 전문 에이전트 API (Fallback)",
+                description="MLB 이적 전문 에이전트입니다",
+                version="2.0.0"
+            )
             
-        @app.get("/.well-known/agent.json")
-        async def agent_card():
-            return {"name": "MLB 이적 전문 에이전트", "status": "fallback"}
-            
-    except ImportError:
-        # FastAPI도 없으면 에러
-        raise ImportError("FastAPI를 사용할 수 없습니다")
+            @app.get("/")
+            async def root():
+                return {"message": "MLB Agent API (Fallback Mode)", "status": "limited"}
+                
+            @app.get("/.well-known/agent.json")
+            async def agent_card():
+                return {"name": "MLB 이적 전문 에이전트", "status": "fallback"}
+                
+            logger.info("✅ Fallback FastAPI 앱 생성 성공")
+                
+        except ImportError:
+            # FastAPI도 없으면 에러
+            raise ImportError("FastAPI를 사용할 수 없습니다")
 
 # Vercel이 인식하는 ASGI 앱 객체
 # 이 변수가 있어야 Vercel Python Runtime이 인식합니다 
