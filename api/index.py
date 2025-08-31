@@ -6,6 +6,7 @@ Vercel Python Runtime을 위한 MLB 이적 전문 에이전트 API 엔트리포�
 
 import sys
 from pathlib import Path
+import os
 
 # 프로젝트 루트 import 경로 보정
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -89,14 +90,8 @@ try:
 
     agent_card = create_agent_card()
     
-    try:
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            raise RuntimeError("Missing ANTHROPIC_API_KEY")
-        from agent_executor import MLBTransferAgentExecutor
-        executor = MLBTransferAgentExecutor()
-    except Exception as e:
-        executor = None
-        print(f"⚠️ Agent executor disabled: {e}")
+    executor = MLBTransferAgentExecutor()
+    
 
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
