@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
@@ -146,8 +147,8 @@ class MLBTransferAgent:
         mcp_url = os.getenv("MLB_MCP_SERVER_URL", "http://localhost:8000/mcp")
         if not mcp_url.endswith('/'):
             mcp_url += "/"
-        self.mcp_url = MultiServerMCPClient({
-            "mlb":{transport: "streamable_http", url: mcp_url}
+        self.mcp_client = MultiServerMCPClient({
+            "mlb": {"transport": "streamable_http", "url": mcp_url}
         })
         
         # 프롬프트 로드
