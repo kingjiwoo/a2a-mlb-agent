@@ -408,30 +408,19 @@ class MLBTransferAgentExecutor(A2AAgentExecutor):
         return "안녕하세요"
     
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """에이전트를 실행하고 결과를 이벤트 큐로 전송합니다."""
         try:
             user_text = self._extract_user_text(context)
             result_text = await self.agent.invoke(user_text)
 
             msg: Message = new_agent_text_message(result_text)
-
-            # enqueue/put 둘 다 대비 (버전별 메서드명이 다를 수 있음)
-            enqueue = getattr(event_queue, "enqueue", None) or getattr(event_queue, "put", None)
-            if not enqueue:
-                raise RuntimeError("EventQueue에 메시지를 넣는 메서드(enqueue/put)가 없습니다.")
-            await enqueue(msg)
+            await event_queue.enqueue_event(msg)  # ✅ 여기만 호출하면 됨
 
         except Exception as e:
-            logger.error(f"에이전트 실행 중 오류: {e}")
-            err_msg: Message = new_agent_text_message(f"에이전트 실행 중 오류: {e}")
-            enqueue = getattr(event_queue, "enqueue", None) or getattr(event_queue, "put", None)
-            if enqueue:
-                await enqueue(err_msg)
-        finally:
-            # 스트림 종료(핵심!)
-            close = getattr(event_queue, "close", None)
-            if close:
-                await close()
+            logger.exception("에이전트 실행 중 오류")
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"에이전트 실행 중 오류가 발생했습니다: {e}")
+            )
+
         
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """에이전트 실행을 취소합니다."""
