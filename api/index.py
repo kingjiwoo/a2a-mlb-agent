@@ -82,6 +82,36 @@ def build_a2a_app():
     server = A2AFastAPIApplication(agent_card=agent_card, http_handler=handler)
     app = server.build()
     logger.info("✅ A2A app built (executor attached)")
+
+    try:
+        # 1) 일반 패키지 임포트 경로 (권장)
+        from mlb_api_mcp.app import app as mcp_app  # 예: 패키지에서 FastAPI app 노출하는 경우
+    except Exception:
+        try:
+            # 2) 동적 임포트: main.py에서 FastAPI app을 얻는 패턴
+            import importlib.util
+            mcp_main = (
+                Path(__file__).resolve().parents[1] / "third_party" / "mlb_api_mcp" / "main.py"
+            )
+            spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(mcp_main))
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            # 관용적으로 main.py 안에 app 또는 create_app 같은 팩토리가 있음
+            mcp_app = getattr(m, "app", None)
+            if mcp_app is None and hasattr(m, "create_app"):
+                mcp_app = m.create_app()
+            if mcp_app is None and hasattr(m, "server"):
+                # FastMCP 스타일이면 server.build()로 FastAPI 반환하는 경우도 있음
+                mcp_app = m.server.build()
+            if mcp_app is None:
+                raise RuntimeError("mlb-api-mcp에서 FastAPI app을 찾지 못함(app/create_app/server)")
+        except Exception as ie:
+            logger.exception(f"❌ MCP subapp import failed: {ie}")
+            return app  # MCP 없이도 A2A는 동작
+
+    # 마운트 위치는 /mlb 로 권장(충돌 방지)
+    app.mount("/mlb", mcp_app)
+    logger.info("✅ MCP mounted at /mlb")
     return app
 
 
