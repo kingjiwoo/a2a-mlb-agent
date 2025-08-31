@@ -4,6 +4,8 @@ import sys
 import logging
 from pathlib import Path
 
+from importlib.util import spec_from_file_location, module_from_spec
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,57 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from agent_executor import MLBTransferAgentExecutor
 
+
+def mount_local_mcp_subapp(app) -> bool:
+    """
+    리포 내 동봉된 mlb-api-mcp를 탐색해 FastAPI subapp을 /mlb 경로에 마운트.
+    성공 시 True, 실패 시 False.
+    """
+    base = Path(__file__).resolve().parent.parent  # 프로젝트 루트 기준
+    candidates = [
+        base / "third_party" / "mlb-api-mcp" / "main.py",
+        base / "third_party" / "mlb_api_mcp" / "main.py",
+        base / "mlb-api-mcp" / "main.py",
+        base / "mlb_api_mcp" / "main.py",
+        base / "packages" / "mlb-api-mcp" / "main.py",
+        base / "packages" / "mlb_api_mcp" / "main.py",
+    ]
+
+    for main_py in candidates:
+        if main_py.exists():
+            try:
+                spec = spec_from_file_location("mlb_mcp_main", str(main_py))
+                m = module_from_spec(spec)
+                assert spec.loader is not None
+                spec.loader.exec_module(m)
+
+                # 1) main.py 가 FastAPI app 을 직접 노출
+                mcp_app = getattr(m, "app", None)
+
+                # 2) 팩토리 함수 패턴 시도
+                if mcp_app is None:
+                    factory = getattr(m, "build_app", None) or getattr(m, "create_app", None)
+                    if callable(factory):
+                        mcp_app = factory()
+
+                # 3) FastMCP 객체(mcp)를 노출하고 그 안에 app 이 있는 패턴
+                if mcp_app is None:
+                    mcp = getattr(m, "mcp", None)
+                    if mcp is not None and hasattr(mcp, "app"):
+                        mcp_app = getattr(mcp, "app")
+
+                if mcp_app is None:
+                    raise RuntimeError("mlb-api-mcp FastAPI app entrypoint를 찾지 못했습니다.")
+
+                app.mount("/mlb", mcp_app)
+                logger.info(f"✅ MCP subapp mounted at /mlb (from {main_py})")
+                return True
+
+            except Exception as e:
+                logger.error(f"❌ MCP mount attempt failed at {main_py}: {e}")
+
+    logger.error("❌ mlb-api-mcp main.py를 찾지 못했습니다. 탐색 경로를 확인하세요.")
+    return False
 
 def create_agent_card() -> AgentCard:
     transfer_analysis_skill = AgentSkill(
@@ -73,43 +126,50 @@ def create_agent_card() -> AgentCard:
 
 
 def build_a2a_app():
-    # 필수 ENV 없으면 빨리 실패하여 원인 명확화
     if not os.getenv("ANTHROPIC_API_KEY"):
         raise RuntimeError("Missing ANTHROPIC_API_KEY")
+
     agent_card = create_agent_card()
-    executor = MLBTransferAgentExecutor()  # 실패 시 예외 발생 → except로 폴백
+    executor = MLBTransferAgentExecutor()
     handler = DefaultRequestHandler(agent_executor=executor, task_store=InMemoryTaskStore())
     server = A2AFastAPIApplication(agent_card=agent_card, http_handler=handler)
+
     app = server.build()
     logger.info("✅ A2A app built (executor attached)")
 
+    # ✅ 여기에서 MCP 마운트 시도
     try:
-        # 1) 일반 패키지 임포트 경로 (권장)
-        from mlb_api_mcp.app import app as mcp_app  # 예: 패키지에서 FastAPI app 노출하는 경우
+        # 1) 패키지 임포트 경로
+        from mlb_api_mcp.app import app as mcp_app
     except Exception:
         try:
-            # 2) 동적 임포트: main.py에서 FastAPI app을 얻는 패턴
+            # 2) 동적 임포트 경로 (하이픈/언더스코어 모두 탐색)
             import importlib.util
-            mcp_main = (
-                Path(__file__).resolve().parents[1] / "third_party" / "mlb_api_mcp" / "main.py"
-            )
-            spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(mcp_main))
-            m = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(m)
-            # 관용적으로 main.py 안에 app 또는 create_app 같은 팩토리가 있음
-            mcp_app = getattr(m, "app", None)
-            if mcp_app is None and hasattr(m, "create_app"):
-                mcp_app = m.create_app()
-            if mcp_app is None and hasattr(m, "server"):
-                # FastMCP 스타일이면 server.build()로 FastAPI 반환하는 경우도 있음
-                mcp_app = m.server.build()
-            if mcp_app is None:
-                raise RuntimeError("mlb-api-mcp에서 FastAPI app을 찾지 못함(app/create_app/server)")
+            project_root = Path(__file__).resolve().parents[1]
+            candidates = [
+                project_root / "third_party" / "mlb_api_mcp" / "main.py",
+                project_root / "third_party" / "mlb-api-mcp" / "main.py",
+                project_root / "mlb_api_mcp" / "main.py",
+                project_root / "mlb-api-mcp" / "main.py",
+            ]
+            mcp_app = None
+            for main_py in candidates:
+                if main_py.exists():
+                    spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(main_py))
+                    m = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(m)  # type: ignore
+                    mcp_app = getattr(m, "app", None) \
+                              or (callable(getattr(m, "create_app", None)) and m.create_app()) \
+                              or (hasattr(m, "server") and getattr(m, "server").build())
+                    if mcp_app:
+                        break
+            if not mcp_app:
+                raise RuntimeError("mlb-api-mcp FastAPI app entrypoint를 찾지 못함")
         except Exception as ie:
             logger.exception(f"❌ MCP subapp import failed: {ie}")
             return app  # MCP 없이도 A2A는 동작
 
-    # 마운트 위치는 /mlb 로 권장(충돌 방지)
+    # 충돌 방지용 서브경로
     app.mount("/mlb", mcp_app)
     logger.info("✅ MCP mounted at /mlb")
     return app
