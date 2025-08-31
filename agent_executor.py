@@ -142,15 +142,13 @@ class MLBTransferAgent:
             temperature=0
         )
         
-        # MCP 클라이언트 초기화
-        self.mcp_client = MultiServerMCPClient(
-            {
-                "mlb": {
-                    "transport": "streamable_http",
-                    "url": "http://localhost:8000/mcp/",
-                }
-            }
-        )
+        #mcp 클라이언트 초기화 
+        mcp_url = os.getenv("MLB_MCP_SERVER_URL", "http://localhost:8000/mcp")
+        if not mcp_url.endswith('/'):
+            mcp_url += "/"
+        self.mcp_url = MultiServerMCPClient({
+            "mlb":{transport: "streamable_http", url: mcp_url}
+        })
         
         # 프롬프트 로드
         self.prompts = self._load_prompts()
@@ -158,6 +156,7 @@ class MLBTransferAgent:
         # 툴과 에이전트 초기화
         self.tools = None
         self.agent = None
+        self._init_lock = asyncio.Lock()
         logger.info("MLB 이적 전문 에이전트 초기화 완료")
 
     def _load_prompts(self) -> Dict[str, str]:
@@ -195,53 +194,44 @@ class MLBTransferAgent:
         return prompts
 
     async def _initialize_agent(self):
-        """MCP 툴을 로드하고 create_react_agent를 초기화합니다."""
-        if self.tools is None:
+        """MCP 툴 로드 + create_react_agent 생성(항상 self.agent 보장)"""+        if self.agent is not None:
+            return
+        async with self._init_lock:
+            if self.agent is not None:  # 다른 코루틴이 먼저 만들었으면 종료
+                return
             try:
-                logger.info("MCP 툴 로드 중...")
-                raw_tools = await self.mcp_client.get_tools()
-                logger.info(f"원시 MCP 툴 {len(raw_tools)}개 발견")
-                
-                # raw_tools가 리스트인 경우 딕셔너리로 변환
-                if isinstance(raw_tools, list):
-                    logger.info("MCP 툴을 딕셔너리 형태로 변환 중...")
-                    tools_dict = {}
-                    for i, tool in enumerate(raw_tools):
-                        if hasattr(tool, 'name'):
-                            tools_dict[tool.name] = tool
-                        else:
-                            tools_dict[f"tool_{i}"] = tool
-                    raw_tools = tools_dict
-                    logger.info(f"변환 완료: {len(raw_tools)}개 툴")
-                
-                # MCP 툴들을 LangChain 툴로 래핑
-                self.tools = []
-                if raw_tools:
-                    logger.info(f"총 {len(raw_tools)}개의 툴을 래핑 중...")
-                    
-                    for tool_name, mcp_tool in raw_tools.items():
-                        try:
-                            # MCP 툴의 필수 속성 확인
-                            if hasattr(mcp_tool, 'name') and hasattr(mcp_tool, 'description'):
-                                wrapped_tool = MCPToolWrapper(mcp_tool)
-                                self.tools.append(wrapped_tool)
-                                logger.info(f"✅ 툴 {tool_name} 래핑 성공")
-                            else:
-                                logger.warning(f"⚠️ 툴 {tool_name}에 필수 속성이 없어 건너뜀")
-                        except Exception as e:
-                            logger.error(f"❌ 툴 {tool_name} 래핑 중 오류: {e}")
-                            continue
-                    
-                    logger.info(f"총 {len(self.tools)}개의 툴이 성공적으로 래핑되었습니다.")
+                logger.info("MCP 연결 및 툴 로드 시작...")
+                # 연결 (너무 오래 붙잡지 않도록 짧은 타임아웃)
+                try:
+                    await asyncio.wait_for(self.mcp_client.connect_all(), timeout=2.0)
+                except Exception as ce:
+                    logger.warning(f"MCP 연결 실패(무시하고 툴 없이 진행): {ce}")
+                    self.tools = []
                 else:
-                    logger.warning("⚠️ 사용 가능한 MCP 툴이 없습니다.")
-                
-                # create_react_agent 생성
-                self._create_react_agent()
-                
+                    raw_tools = await self.mcp_client.get_tools()
+                    logger.info(f"원시 MCP 툴 {len(raw_tools) if hasattr(raw_tools,'__len__') else 'N/A'}개 발견")
+                    # dict/list 모두 허용 → dict로 정규화
+                    if isinstance(raw_tools, list):
+                        tools_dict = {}
+                        for i, tool in enumerate(raw_tools):
+                            name = getattr(tool, "name", f"tool_{i}")
+                            tools_dict[name] = tool
+                        raw_tools = tools_dict
+                    # 래핑
+                    wrapped = []
+                    for tool_name, mcp_tool in (raw_tools or {}).items():
+                        if hasattr(mcp_tool, "name") and hasattr(mcp_tool, "description"):
+                            try:
+                                wrapped.append(MCPToolWrapper(mcp_tool))
+                                logger.info(f"✅ 툴 {tool_name} 래핑 성공")
+                            except Exception as we:
+                                logger.warning(f"툴 {tool_name} 래핑 실패: {we}")
+                    self.tools = wrapped
             except Exception as e:
-                logger.error(f"에이전트 초기화 중 오류: {e}")
-                logger.info("기본 create_react_agent 생성 (툴 없이)")
+                logger.error(f"에이전트 초기화 중 오류(툴 없이 진행): {e}")
+                self.tools = []
+            finally:
+                # 어떤 경우에도 agent는 반드시 생성
                 self._create_react_agent()
 
     def _create_react_agent(self):
@@ -280,6 +270,8 @@ class MLBTransferAgent:
         try:
             # 에이전트 초기화
             await self._initialize_agent()
+            if self.agent is None:
+                self._create_react_agent()
             
             # 사용자 의도에 따른 프롬프트 선택
             enhanced_message = self._enhance_message_with_prompt(user_message)
