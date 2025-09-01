@@ -5,6 +5,9 @@ import logging
 from pathlib import Path
 
 from importlib.util import spec_from_file_location, module_from_spec
+import importlib.util
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware import Middleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,41 +37,52 @@ def mount_local_mcp_subapp(app) -> bool:
         base / "packages" / "mlb_api_mcp" / "main.py",
     ]
 
-    for main_py in candidates:
-        if main_py.exists():
-            try:
-                spec = spec_from_file_location("mlb_mcp_main", str(main_py))
-                m = module_from_spec(spec)
-                assert spec.loader is not None
-                spec.loader.exec_module(m)
+    mcp_app = None
+for main_py in candidates:
+    if main_py.exists():
+        spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(main_py))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)  # type: ignore
 
-                # 1) main.py 가 FastAPI app 을 직접 노출
-                mcp_app = getattr(m, "app", None)
+        # 1) 이미 FastAPI app을 노출했다면 사용
+        mcp_app = getattr(m, "app", None)
+        # 2) 팩토리 함수라면 호출
+        if not mcp_app:
+            factory = getattr(m, "create_app", None) or getattr(m, "build_app", None)
+            if callable(factory):
+                mcp_app = factory()
+        # 3) FastMCP 객체(mcp)가 있다면, 여기서 직접 http_app을 생성(가장 확실!)
+        if not mcp_app and hasattr(m, "mcp"):
+            cors = Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=["*"],
+                expose_headers=["mcp-session-id"],
+                max_age=86400,
+            )
+            mcp_app = m.mcp.http_app(middleware=[cors])
 
-                # 2) 팩토리 함수 패턴 시도
-                if mcp_app is None:
-                    factory = getattr(m, "build_app", None) or getattr(m, "create_app", None)
-                    if callable(factory):
-                        mcp_app = factory()
+            # /mcp → /mcp/ 리다이렉트(Starlette Mount 트레일링 슬래시 워크어라운드)
+            class MCPPathRedirect:
+                def __init__(self, app):
+                    self.app = app
+                async def __call__(self, scope, receive, send):
+                    if scope.get("type") == "http" and scope.get("path") == "/mcp":
+                        scope["path"] = "/mcp/"
+                        scope["raw_path"] = b"/mcp/"
+                    await self.app(scope, receive, send)
+            mcp_app = MCPPathRedirect(mcp_app)
 
-                # 3) FastMCP 객체(mcp)를 노출하고 그 안에 app 이 있는 패턴
-                if mcp_app is None:
-                    mcp = getattr(m, "mcp", None)
-                    if mcp is not None and hasattr(mcp, "app"):
-                        mcp_app = getattr(mcp, "app")
+        if mcp_app:
+            break
 
-                if mcp_app is None:
-                    raise RuntimeError("mlb-api-mcp FastAPI app entrypoint를 찾지 못했습니다.")
+if not mcp_app:
+    raise RuntimeError("mlb-api-mcp FastAPI app entrypoint를 찾지 못함")
 
-                app.mount("/mlb", mcp_app)
-                logger.info(f"✅ MCP subapp mounted at /mlb (from {main_py})")
-                return True
-
-            except Exception as e:
-                logger.error(f"❌ MCP mount attempt failed at {main_py}: {e}")
-
-    logger.error("❌ mlb-api-mcp main.py를 찾지 못했습니다. 탐색 경로를 확인하세요.")
-    return False
+app.mount("/mlb", mcp_app)
+logger.info("✅ MCP mounted at /mlb")
 
 def create_agent_card() -> AgentCard:
     transfer_analysis_skill = AgentSkill(
