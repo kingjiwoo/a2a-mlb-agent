@@ -235,3 +235,31 @@ if __name__ == "__main__":
     else:
         # Run with stdio transport (for Smithery)
         mcp.run(transport="stdio")
+def create_app():
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
+
+    cors = Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["mcp-session-id"],
+        max_age=86400,
+    )
+
+    starlette_app = mcp.http_app(middleware=[cors])
+
+    class MCPPathRedirect:
+        def __init__(self, app): self.app = app
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http" and scope.get("path") == "/mcp":
+                scope["path"] = "/mcp/"
+                scope["raw_path"] = b"/mcp/"
+            await self.app(scope, receive, send)
+
+    return MCPPathRedirect(starlette_app)
+
+# 모듈 임포트 시 즉시 노출
+app = create_app()

@@ -18,3 +18,11 @@ a2a-sdk>=0.1.0
 
 # 유틸리티
 httpx>=0.25.0 
+
+fastmcp
+fastapi
+uvicorn[standard]
+websockets
+python-mlb-statsapi
+python-dotenv
+httpx

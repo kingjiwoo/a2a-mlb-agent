@@ -1,10 +1,12 @@
 {
   "functions": {
     "api/index.py": {
+      "runtime": "python3.12",
       "maxDuration": 60,
       "memory": 1024
     }
   },
+  "installCommand": "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi",
   "rewrites": [
     { "source": "/.well-known/agent.json", "destination": "/api/index.py" },
     { "source": "/api/(.*)", "destination": "/api/index.py" },
@@ -14,19 +16,18 @@
     {
       "source": "/api/(.*)",
       "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        },
-        {
-          "key": "Access-Control-Allow-Methods",
-          "value": "GET, POST, PUT, DELETE, OPTIONS"
-        },
-        {
-          "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type, Authorization"
-        }
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, DELETE, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+      ]
+    },
+    {
+      "source": "/mlb/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
       ]
     }
   ]
-} 
+}

@@ -137,15 +137,29 @@ def build_a2a_app():
     app = server.build()
     logger.info("✅ A2A app built (executor attached)")
 
-    # ✅ 여기에서 MCP 마운트 시도
     try:
-        # 1) 패키지 임포트 경로
-        from mlb_api_mcp.app import app as mcp_app
-    except Exception:
+        # 0) third_party를 import 경로에 추가
+        project_root = Path(__file__).resolve().parents[1]
+        third_party = project_root / "third_party"
+        if third_party.exists():
+            p = str(third_party)
+            if p not in sys.path:
+                sys.path.insert(0, p)
+
+        # 1) 패키지 방식으로 먼저 시도: third_party/mlb_api_mcp/main.py를 패키지로 import
         try:
-            # 2) 동적 임포트 경로 (하이픈/언더스코어 모두 탐색)
+            from mlb_api_mcp import main as mcp_main
+            mcp_app = (
+                getattr(mcp_main, "app", None)
+                or (callable(getattr(mcp_main, "create_app", None)) and mcp_main.create_app())
+                or (hasattr(mcp_main, "mcp") and callable(getattr(mcp_main.mcp, "http_app", None)) and mcp_main.mcp.http_app())
+            )
+            if not mcp_app:
+                raise RuntimeError("mlb_api_mcp.main에서 app/create_app/mcp.http_app을 찾지 못함")
+
+        except Exception:
+            # 2) 파일 경로 동적 로딩 (하이픈/언더스코어 모두 탐색)
             import importlib.util
-            project_root = Path(__file__).resolve().parents[1]
             candidates = [
                 project_root / "third_party" / "mlb_api_mcp" / "main.py",
                 project_root / "third_party" / "mlb-api-mcp" / "main.py",
@@ -158,20 +172,26 @@ def build_a2a_app():
                     spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(main_py))
                     m = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(m)  # type: ignore
-                    mcp_app = getattr(m, "app", None) \
-                              or (callable(getattr(m, "create_app", None)) and m.create_app()) \
-                              or (hasattr(m, "server") and getattr(m, "server").build())
+
+                    mcp_app = (
+                        getattr(m, "app", None)
+                        or (callable(getattr(m, "create_app", None)) and m.create_app())
+                        or (hasattr(m, "mcp") and callable(getattr(m.mcp, "http_app", None)) and m.mcp.http_app())
+                    )
                     if mcp_app:
+                        logger.info(f"✅ MCP subapp resolved from {main_py}")
                         break
+
             if not mcp_app:
                 raise RuntimeError("mlb-api-mcp FastAPI app entrypoint를 찾지 못함")
-        except Exception as ie:
-            logger.exception(f"❌ MCP subapp import failed: {ie}")
-            return app  # MCP 없이도 A2A는 동작
 
-    # 충돌 방지용 서브경로
-    app.mount("/mlb", mcp_app)
-    logger.info("✅ MCP mounted at /mlb")
+        # 3) /mlb로 마운트
+        app.mount("/mlb", mcp_app)
+        logger.info("✅ MCP mounted at /mlb")
+
+    except Exception as ie:
+        logger.exception(f"❌ MCP subapp import failed: {ie}")
+        return app
     return app
 
 
