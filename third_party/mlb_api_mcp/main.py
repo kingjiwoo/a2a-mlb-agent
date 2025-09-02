@@ -8,8 +8,13 @@ from fastmcp import FastMCP
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 
-from generic_api import setup_generic_tools
-from mlb_api import setup_mlb_tools
+try:
+    from generic_api import setup_generic_tools
+    from mlb_api import setup_mlb_tools
+except ImportError:
+    # 패키지 컨텍스트일 때
+    from .generic_api import setup_generic_tools
+    from .mlb_api import setup_mlb_tools
 
 # Suppress websockets deprecation warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
@@ -252,7 +257,8 @@ def create_app():
     starlette_app = mcp.http_app(middleware=[cors])
 
     class MCPPathRedirect:
-        def __init__(self, app): self.app = app
+        def __init__(self, app): 
+            self.app = app
         async def __call__(self, scope, receive, send):
             if scope.get("type") == "http" and scope.get("path") == "/mcp":
                 scope["path"] = "/mcp/"

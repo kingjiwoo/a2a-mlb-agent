@@ -144,7 +144,7 @@ class MLBTransferAgent:
         )
         
         #mcp 클라이언트 초기화 
-        mcp_url = os.getenv("MLB_MCP_SERVER_URL", "http://localhost:8000/mcp")
+        mcp_url = os.getenv("MLB_MCP_SERVER_URL", "http://localhost:8000/mlb/mcp")
         if not mcp_url.endswith('/'):
             mcp_url += "/"
         self.mcp_client = MultiServerMCPClient({
