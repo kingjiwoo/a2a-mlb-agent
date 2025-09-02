@@ -1,23 +1,18 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/index.py": {
-      "runtime": "vercel-python@3.12",
       "maxDuration": 60,
       "memory": 1024
-    },
-    "api/**/*.py": {
-      "runtime": "vercel-python@3.12"
     }
   },
-  "installCommand": "pip install -r requirements.txt",
   "rewrites": [
-    { "source": "/.well-known/agent.json", "destination": "/api/index.py" },
-    { "source": "/api/(.*)", "destination": "/api/index.py" },
-    { "source": "/(.*)", "destination": "/api/index.py" }
+    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/:path*", "destination": "/api/index" }
   ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/:path*",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, DELETE, OPTIONS" },
