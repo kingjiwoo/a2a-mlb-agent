@@ -38,31 +38,31 @@ def mount_local_mcp_subapp(app) -> bool:
     ]
 
     mcp_app = None
-for main_py in candidates:
-    if main_py.exists():
-        spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(main_py))
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)  # type: ignore
+    for main_py in candidates:
+        if main_py.exists():
+            spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(main_py))
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)  # type: ignore
 
-        # 1) 이미 FastAPI app을 노출했다면 사용
-        mcp_app = getattr(m, "app", None)
-        # 2) 팩토리 함수라면 호출
-        if not mcp_app:
-            factory = getattr(m, "create_app", None) or getattr(m, "build_app", None)
-            if callable(factory):
-                mcp_app = factory()
-        # 3) FastMCP 객체(mcp)가 있다면, 여기서 직접 http_app을 생성(가장 확실!)
-        if not mcp_app and hasattr(m, "mcp"):
-            cors = Middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
-                allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=["*"],
-                expose_headers=["mcp-session-id"],
-                max_age=86400,
-            )
-            mcp_app = m.mcp.http_app(middleware=[cors])
+            # 1) 이미 FastAPI app을 노출했다면 사용
+            mcp_app = getattr(m, "app", None)
+            # 2) 팩토리 함수라면 호출
+            if not mcp_app:
+                factory = getattr(m, "create_app", None) or getattr(m, "build_app", None)
+                if callable(factory):
+                    mcp_app = factory()
+            # 3) FastMCP 객체(mcp)가 있다면, 여기서 직접 http_app을 생성(가장 확실!)
+            if not mcp_app and hasattr(m, "mcp"):
+                cors = Middleware(
+                    CORSMiddleware,
+                    allow_origins=["*"],
+                    allow_credentials=True,
+                    allow_methods=["GET", "POST", "OPTIONS"],
+                    allow_headers=["*"],
+                    expose_headers=["mcp-session-id"],
+                    max_age=86400,
+                )
+                mcp_app = m.mcp.http_app(middleware=[cors])
 
             # /mcp → /mcp/ 리다이렉트(Starlette Mount 트레일링 슬래시 워크어라운드)
             class MCPPathRedirect:
