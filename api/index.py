@@ -25,21 +25,20 @@ from agent_executor import MLBTransferAgentExecutor
 def mount_local_mcp_subapp() -> object:
     import importlib
     base = Path(__file__).resolve().parent.parent  # repo root
-    # 루트를 import 경로에 추가
+    # repo root를 import 경로 최우선에
     if str(base) not in sys.path:
         sys.path.insert(0, str(base))
 
-    # 패키지 경로 후보
     module_candidates = [
-        "third_party.mlb_api_mcp.main",
-        "mlb_api_mcp.main",
+        "third_party.mlb_api_mcp.main",  # 우리가 원하는 패키지 경로
+        "mlb_api_mcp.main",              # 혹시 루트 바로 아래 두는 경우 대비
     ]
 
-    mcp_app = None
     last_err = None
     for modname in module_candidates:
         try:
             m = importlib.import_module(modname)
+
             # 1) FastAPI app을 직접 노출?
             mcp_app = getattr(m, "app", None)
 
@@ -49,10 +48,8 @@ def mount_local_mcp_subapp() -> object:
                 if callable(factory):
                     mcp_app = factory()
 
-            # 3) FastMCP 객체(mcp)에서 http_app 생성
+            # 3) FastMCP 객체(mcp)에서 http_app을 생성
             if not mcp_app and hasattr(m, "mcp"):
-                from starlette.middleware.cors import CORSMiddleware
-                from starlette.middleware import Middleware
                 cors = Middleware(
                     CORSMiddleware,
                     allow_origins=["*"],
@@ -64,7 +61,7 @@ def mount_local_mcp_subapp() -> object:
                 )
                 mcp_app = m.mcp.http_app(middleware=[cors])
 
-                # /mcp → /mcp/ 보정
+                # /mcp -> /mcp/ 보정
                 class MCPPathRedirect:
                     def __init__(self, app): self.app = app
                     async def __call__(self, scope, receive, send):

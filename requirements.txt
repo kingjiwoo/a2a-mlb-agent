@@ -26,3 +26,4 @@ websockets
 python-mlb-statsapi
 python-dotenv
 httpx
+a2a

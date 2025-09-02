@@ -8,13 +8,13 @@ from fastmcp import FastMCP
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 
-try:
-    from generic_api import setup_generic_tools
-    from mlb_api import setup_mlb_tools
-except ImportError:
-    # 패키지 컨텍스트일 때
-    from .generic_api import setup_generic_tools
-    from .mlb_api import setup_mlb_tools
+# try:
+#     from generic_api import setup_generic_tools
+#     from mlb_api import setup_mlb_tools
+# except ImportError:
+#     # 패키지 컨텍스트일 때
+from .generic_api import setup_generic_tools
+from .mlb_api import setup_mlb_tools
 
 # Suppress websockets deprecation warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
