@@ -23,64 +23,63 @@ from agent_executor import MLBTransferAgentExecutor
 
 
 def mount_local_mcp_subapp() -> object:
-    base = Path(__file__).resolve().parent.parent
-    candidates = [
-        base / "third_party" / "mlb-api-mcp" / "main.py",
-        base / "third_party" / "mlb_api_mcp" / "main.py",
-        base / "mlb-api-mcp" / "main.py",
-        base / "mlb_api_mcp" / "main.py",
-        base / "packages" / "mlb-api-mcp" / "main.py",
-        base / "packages" / "mlb_api_mcp" / "main.py",
+    import importlib
+    base = Path(__file__).resolve().parent.parent  # repo root
+    # 루트를 import 경로에 추가
+    if str(base) not in sys.path:
+        sys.path.insert(0, str(base))
+
+    # 패키지 경로 후보
+    module_candidates = [
+        "third_party.mlb_api_mcp.main",
+        "mlb_api_mcp.main",
     ]
 
-    for main_py in candidates:
-        if not main_py.exists():
-            continue
+    mcp_app = None
+    last_err = None
+    for modname in module_candidates:
+        try:
+            m = importlib.import_module(modname)
+            # 1) FastAPI app을 직접 노출?
+            mcp_app = getattr(m, "app", None)
 
-        # ✅ 같은 폴더의 generic_api.py, mlb_api.py를 import 가능하도록 경로 추가
-        pkg_root = main_py.parent
-        if str(pkg_root) not in sys.path:
-            sys.path.insert(0, str(pkg_root))
+            # 2) 팩토리 함수?
+            if not mcp_app:
+                factory = getattr(m, "create_app", None) or getattr(m, "build_app", None)
+                if callable(factory):
+                    mcp_app = factory()
 
-        spec = importlib.util.spec_from_file_location("mlb_api_mcp_main", str(main_py))
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)  # <- 이제 generic_api/ mlb_api 인식됨
+            # 3) FastMCP 객체(mcp)에서 http_app 생성
+            if not mcp_app and hasattr(m, "mcp"):
+                from starlette.middleware.cors import CORSMiddleware
+                from starlette.middleware import Middleware
+                cors = Middleware(
+                    CORSMiddleware,
+                    allow_origins=["*"],
+                    allow_credentials=True,
+                    allow_methods=["GET", "POST", "OPTIONS"],
+                    allow_headers=["*"],
+                    expose_headers=["mcp-session-id"],
+                    max_age=86400,
+                )
+                mcp_app = m.mcp.http_app(middleware=[cors])
 
-        # 1) app 직접 노출?
-        mcp_app = getattr(m, "app", None)
+                # /mcp → /mcp/ 보정
+                class MCPPathRedirect:
+                    def __init__(self, app): self.app = app
+                    async def __call__(self, scope, receive, send):
+                        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+                            scope["path"] = "/mcp/"; scope["raw_path"] = b"/mcp/"
+                        await self.app(scope, receive, send)
+                mcp_app = MCPPathRedirect(mcp_app)
 
-        # 2) 팩토리?
-        if not mcp_app:
-            factory = getattr(m, "create_app", None) or getattr(m, "build_app", None)
-            if callable(factory):
-                mcp_app = factory()
+            if mcp_app:
+                return mcp_app
+        except Exception as e:
+            last_err = e
 
-        # 3) FastMCP 객체에서 http_app 생성
-        if not mcp_app and hasattr(m, "mcp"):
-            cors = Middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
-                allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=["*"],
-                expose_headers=["mcp-session-id"],
-                max_age=86400,
-            )
-            mcp_app = m.mcp.http_app(middleware=[cors])
-
-            class MCPPathRedirect:
-                def __init__(self, app): self.app = app
-                async def __call__(self, scope, receive, send):
-                    if scope.get("type") == "http" and scope.get("path") == "/mcp":
-                        scope["path"] = "/mcp/"; scope["raw_path"] = b"/mcp/"
-                    await self.app(scope, receive, send)
-            mcp_app = MCPPathRedirect(mcp_app)
-
-        if mcp_app:
-            return mcp_app
-
+    logger.error(f"❌ mlb-api-mcp 패키지 import 실패: {last_err}")
     return None
-
 
 def create_agent_card() -> AgentCard:
     transfer_analysis_skill = AgentSkill(
