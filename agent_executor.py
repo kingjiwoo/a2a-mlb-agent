@@ -143,8 +143,27 @@ class MLBTransferAgent:
             temperature=0
         )
         
-        #mcp 클라이언트 초기화 
-        mcp_url = os.getenv("MLB_MCP_SERVER_URL", "http://localhost:8000/mlb/mcp")
+        # MCP 클라이언트 초기화
+        # Vercel 환경에서는 퍼블릭 URL을 기준으로 자체 마운트된 MCP 엔드포인트(/mlb/mcp/)로 연결
+        def _default_mcp_url() -> str:
+            # 우선순위 1: 명시적 환경변수
+            env_url = os.getenv("MLB_MCP_SERVER_URL")
+            if env_url:
+                return env_url
+            # 우선순위 2: Vercel 배포 URL 자동 구성 (예: a2a-mlb-agent.vercel.app)
+            vercel_host = os.getenv("VERCEL_URL")
+            if vercel_host:
+                scheme = "https://"
+                # VERCEL_URL 값이 이미 스킴을 포함한다면 중복 방지
+                if vercel_host.startswith("http://") or vercel_host.startswith("https://"):
+                    base = vercel_host
+                else:
+                    base = f"{scheme}{vercel_host}"
+                return f"{base}/mlb/mcp"
+            # 로컬 개발 기본값
+            return "http://localhost:8000/mlb/mcp"
+
+        mcp_url = _default_mcp_url()
         if not mcp_url.endswith('/'):
             mcp_url += "/"
         self.mcp_client = MultiServerMCPClient({
@@ -205,30 +224,40 @@ class MLBTransferAgent:
                 logger.info("MCP 연결 및 툴 로드 시작...")
                 # 연결 (너무 오래 붙잡지 않도록 짧은 타임아웃)
                 try:
-                    # MultiServerMCPClient의 올바른 연결 메서드 사용
+                    # 일부 구현은 명시적 연결이 필요 없으므로, 메서드가 없으면 건너뛰고 계속 진행
                     if hasattr(self.mcp_client, 'connect_all'):
-                        await asyncio.wait_for(self.mcp_client.connect_all(), timeout=2.0)
+                        await asyncio.wait_for(self.mcp_client.connect_all(), timeout=5.0)
                     elif hasattr(self.mcp_client, 'connect'):
-                        await asyncio.wait_for(self.mcp_client.connect(), timeout=2.0)
+                        await asyncio.wait_for(self.mcp_client.connect(), timeout=5.0)
                     else:
-                        logger.warning("MCP 클라이언트에 연결 메서드가 없습니다")
-                        self.tools = []
-                        return
+                        logger.warning("MCP 클라이언트에 연결 메서드가 없습니다 - 툴 조회로 진행합니다")
                 except Exception as ce:
                     logger.warning(f"MCP 연결 실패(무시하고 툴 없이 진행): {ce}")
-                    self.tools = []
-                    return
+                    # 연결 실패해도 HTTP 기반 클라이언트는 툴 조회가 가능할 수 있으므로 계속 진행
                 
                 # 툴 가져오기
                 try:
-                    if hasattr(self.mcp_client, 'get_tools'):
-                        raw_tools = await self.mcp_client.get_tools()
-                    elif hasattr(self.mcp_client, 'list_tools'):
-                        raw_tools = await self.mcp_client.list_tools()
-                    else:
+                    raw_tools = None
+                    has_any_list_method = any([
+                        hasattr(self.mcp_client, 'get_tools'),
+                        hasattr(self.mcp_client, 'list_tools'),
+                        hasattr(self.mcp_client, 'list_all_tools')
+                    ])
+                    if not has_any_list_method:
                         logger.warning("MCP 클라이언트에 툴 조회 메서드가 없습니다")
                         self.tools = []
                         return
+
+                    # 다양한 버전 호환: get_tools / list_tools / list_all_tools 등 시도
+                    if hasattr(self.mcp_client, 'get_tools'):
+                        maybe = self.mcp_client.get_tools()
+                        raw_tools = await maybe if asyncio.iscoroutine(maybe) else maybe
+                    if not raw_tools and hasattr(self.mcp_client, 'list_tools'):
+                        maybe = self.mcp_client.list_tools()
+                        raw_tools = await maybe if asyncio.iscoroutine(maybe) else maybe
+                    if not raw_tools and hasattr(self.mcp_client, 'list_all_tools'):
+                        maybe = self.mcp_client.list_all_tools()
+                        raw_tools = await maybe if asyncio.iscoroutine(maybe) else maybe
                         
                     logger.info(f"원시 MCP 툴 {len(raw_tools) if hasattr(raw_tools,'__len__') else 'N/A'}개 발견")
                     
