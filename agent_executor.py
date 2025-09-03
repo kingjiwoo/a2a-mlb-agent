@@ -9,11 +9,14 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
 
 from a2a.server.agent_execution import AgentExecutor as A2AAgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import Message
 from a2a.utils import new_agent_text_message
+from memory import ConversationMemoryStore
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -173,11 +176,14 @@ class MLBTransferAgent:
         
         # 프롬프트 로드
         self.prompts = self._load_prompts()
-        
+
         # 툴과 에이전트 초기화
         self.tools = None
         self.agent = None
+        self.agent_with_memory = None
         self._init_lock = asyncio.Lock()
+        # 대화 메모리 저장소 (Redis 사용 가능, 미설정 시 메모리)
+        self._memory_store = ConversationMemoryStore()
         logger.info("MLB 이적 전문 에이전트 초기화 완료")
 
     def _load_prompts(self) -> Dict[str, str]:
@@ -309,9 +315,22 @@ class MLBTransferAgent:
                 tools=[]
             )
         
+        # 메모리 래퍼 구성
+        def get_session_history(config) -> BaseChatMessageHistory:
+            cfg = (config or {}).get("configurable") or {}
+            session_id = cfg.get("session_id") or "default"
+            return self._memory_store.get_history(session_id)
+
+        self.agent_with_memory = RunnableWithMessageHistory(
+            self.agent,
+            get_session_history,
+            input_messages_key="messages",
+            history_messages_key="messages",
+        )
+
         logger.info("create_react_agent 생성 완료")
 
-    async def invoke(self, user_message: str) -> str:
+    async def invoke(self, user_message: str, session_id: Optional[str] = None) -> str:
         """사용자 메시지를 처리하고 응답을 반환합니다."""
         try:
             # 에이전트 초기화
@@ -324,8 +343,10 @@ class MLBTransferAgent:
             
             # create_react_agent 실행
             logger.info("create_react_agent 실행 중...")
-            response = await self.agent.ainvoke(
-                {"messages": [("user", enhanced_message)]}
+            target = self.agent_with_memory or self.agent
+            response = await target.ainvoke(
+                {"messages": [("user", enhanced_message)]},
+                config={"configurable": {"session_id": session_id or "default"}},
             )
             
             result = response["messages"][-1].content
@@ -436,11 +457,30 @@ class MLBTransferAgentExecutor(A2AAgentExecutor):
         except Exception:
             pass
         return "안녕하세요"
+
+    def _extract_session_id(self, context: RequestContext) -> str:
+        """세션/대화 식별자 추출 (없으면 messageId나 기본값)."""
+        # 1) 요청 params에서 시도
+        try:
+            req = getattr(context, "request", None) or {}
+            params = req.get("params") or {}
+            for k in ("session_id", "sessionId", "conversation_id", "conversationId"):
+                if params.get(k):
+                    return str(params.get(k))
+        except Exception:
+            pass
+        # 2) 메시지 ID 활용
+        msg = getattr(context, "message", None)
+        mid = getattr(msg, "messageId", None)
+        if mid:
+            return str(mid)
+        return "default"
     
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         try:
             user_text = self._extract_user_text(context)
-            result_text = await self.agent.invoke(user_text)
+            session_id = self._extract_session_id(context)
+            result_text = await self.agent.invoke(user_text, session_id=session_id)
 
             msg: Message = new_agent_text_message(result_text)
             await event_queue.enqueue_event(msg)  # ✅ 여기만 호출하면 됨

@@ -164,6 +164,86 @@ def build_a2a_app():
     except Exception as ie:
         logger.exception(f"❌ MCP subapp import failed: {ie}")
         # MCP 실패해도 메인 앱은 계속 동작
+    # --- 간단한 UI 라우트 추가 (/, /chat) ---
+    try:
+        from fastapi import Request
+        from fastapi.responses import HTMLResponse, JSONResponse
+
+        @app.get("/", response_class=HTMLResponse)
+        async def chat_ui_root():
+            return """
+<!doctype html>
+<html>
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>MLB Agent Chat</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 32px auto; padding: 0 16px; }
+    h1 { font-size: 20px; }
+    #log { border: 1px solid #ddd; padding: 12px; border-radius: 8px; min-height: 240px; }
+    .msg { margin: 8px 0; }
+    .u { color: #333; }
+    .a { color: #0b6; }
+    form { display: flex; gap: 8px; margin-top: 12px; }
+    input[type=text] { flex: 1; padding: 8px; }
+    small { color: #777; }
+  </style>
+  </head>
+  <body>
+    <h1>MLB 이적 전문 에이전트</h1>
+    <small>세션은 브라우저 탭 기준으로 유지됩니다.</small>
+    <div id=\"log\"></div>
+    <form id=\"f\">
+      <input id=\"t\" type=\"text\" placeholder=\"메시지를 입력하세요...\" required />
+      <button>Send</button>
+    </form>
+    <script>
+      const log = document.getElementById('log');
+      const form = document.getElementById('f');
+      const input = document.getElementById('t');
+      const sid = sessionStorage.getItem('mlb_sid') || (Date.now().toString(36)+Math.random().toString(36).slice(2));
+      sessionStorage.setItem('mlb_sid', sid);
+      function add(role, text){
+        const div = document.createElement('div');
+        div.className = 'msg ' + (role === 'user' ? 'u' : 'a');
+        div.textContent = (role === 'user' ? '나: ' : '에이전트: ') + text;
+        log.appendChild(div); log.scrollTop = log.scrollHeight;
+      }
+      form.addEventListener('submit', async (e)=>{
+        e.preventDefault(); const text = input.value.trim(); if(!text) return; input.value=''; add('user', text);
+        try{
+          const res = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, session_id: sid }) });
+          const j = await res.json(); add('agent', j.reply || j.error || '[no reply]');
+        }catch(err){ add('agent', '에러: ' + (err?.message||err)); }
+      });
+    </script>
+  </body>
+</html>
+            """
+
+        @app.post("/chat")
+        async def chat_api(req: Request):
+            body = await req.json()
+            text = (body or {}).get("text") or ""
+            session_id = (body or {}).get("session_id") or "default"
+            if not text:
+                return JSONResponse({"error": "text is required"}, status_code=400)
+            try:
+                # 내부 실행자 재사용 (메모리 포함)
+                out = await executor.agent.invoke(text, session_id=session_id)
+                return JSONResponse({"reply": out})
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=500)
+
+        # 이전 경로와의 호환성을 위해 /ui/chat도 유지
+        @app.post("/ui/chat")
+        async def chat_api_legacy(req: Request):
+            return await chat_api(req)
+    except Exception:
+        # UI 실패해도 앱은 유지
+        pass
+
     return app
 
 

@@ -27,3 +27,4 @@ python-mlb-statsapi
 python-dotenv
 httpx
 a2a
+redis>=5.0.0
