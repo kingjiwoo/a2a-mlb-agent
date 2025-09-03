@@ -365,8 +365,9 @@ class MLBTransferAgent:
             # create_react_agent 실행
             logger.info("create_react_agent 실행 중...")
             target = self.agent_with_memory or self.agent
+            # LangGraph expects BaseMessage objects or (role, content) tuples. Use BaseMessage for safety.
             response = await target.ainvoke(
-                {"messages": [("user", enhanced_message)]},
+                {"messages": [HumanMessage(content=enhanced_message)]},
                 config={"configurable": {"session_id": session_id or "default"}},
             )
             
