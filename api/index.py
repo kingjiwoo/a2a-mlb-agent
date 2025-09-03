@@ -217,8 +217,46 @@ def build_a2a_app():
       form.addEventListener('submit', async (e)=>{
         e.preventDefault(); const text = input.value.trim(); if(!text) return; input.value=''; add('user', text);
         try{
-          const res = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, session_id: sid }) });
-          const j = await res.json(); add('agent', j.reply || j.error || '[no reply]');
+          // Build A2A JSON-RPC request
+          const payload = {
+            id: 'req-' + Date.now().toString(36),
+            jsonrpc: '2.0',
+            method: 'message/send',
+            params: {
+              sessionId: sid,
+              message: {
+                kind: 'message',
+                messageId: 'msg-' + Date.now().toString(36),
+                role: 'user',
+                parts: [{ kind: 'text', text }]
+              }
+            }
+          };
+          const res = await fetch('/', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          const j = await res.json();
+          // Try to extract text reply from JSON-RPC result
+          let reply = null;
+          if (j && j.result) {
+            const r = j.result;
+            // 1) direct message in result
+            if (r.message && Array.isArray(r.message.parts)) {
+              reply = r.message.parts.filter(p=>p && p.kind==='text').map(p=>p.text).join('\n');
+            }
+            // 2) events array
+            if (!reply && Array.isArray(r.events)) {
+              // find last event with message.parts text
+              for (let i=r.events.length-1; i>=0; i--) {
+                const ev = r.events[i];
+                const msg = ev && (ev.message || ev);
+                const parts = msg && msg.parts;
+                if (Array.isArray(parts)) {
+                  const txt = parts.filter(p=>p && p.kind==='text').map(p=>p.text).join('\n');
+                  if (txt) { reply = txt; break; }
+                }
+              }
+            }
+          }
+          add('agent', reply || j.error?.message || j.error || '[no reply]');
         }catch(err){ add('agent', '에러: ' + (err?.message||err)); }
       });
     </script>
