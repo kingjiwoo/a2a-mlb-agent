@@ -166,6 +166,7 @@ class MLBTransferAgent:
         mcp_url = _default_mcp_url()
         if not mcp_url.endswith('/'):
             mcp_url += "/"
+        logger.info(f"MCP URL resolved: {mcp_url}")
         self.mcp_client = MultiServerMCPClient({
             "mlb": {"transport": "streamable_http", "url": mcp_url}
         })

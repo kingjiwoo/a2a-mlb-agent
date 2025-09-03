@@ -24,14 +24,20 @@ from agent_executor import MLBTransferAgentExecutor
 
 def mount_local_mcp_subapp() -> object:
     import importlib
-    base = Path(__file__).resolve().parent.parent  # repo root
-    # repo root를 import 경로 최우선에
-    if str(base) not in sys.path:
-        sys.path.insert(0, str(base))
+
+    # 경로 후보 구성
+    repo_root = Path(__file__).resolve().parents[2]  # repository root
+    pkg_root = Path(__file__).resolve().parents[1]   # mlb_agent
+    third_party_root = pkg_root / "third_party"
+
+    for p in [str(repo_root), str(pkg_root), str(third_party_root)]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
     module_candidates = [
-        "third_party.mlb_api_mcp.main",  # 우리가 원하는 패키지 경로
-        "mlb_api_mcp.main",              # 혹시 루트 바로 아래 두는 경우 대비
+        "third_party.mlb_api_mcp.main",        # mlb_agent/third_party 기준 import
+        "mlb_agent.third_party.mlb_api_mcp.main",  # repo root 기준 import
+        "mlb_api_mcp.main",                    # third_party가 sys.path에 직접 추가된 경우
     ]
 
     last_err = None
@@ -71,6 +77,7 @@ def mount_local_mcp_subapp() -> object:
                 mcp_app = MCPPathRedirect(mcp_app)
 
             if mcp_app:
+                logger.info(f"✅ MCP subapp loaded via {modname}")
                 return mcp_app
         except Exception as e:
             last_err = e
