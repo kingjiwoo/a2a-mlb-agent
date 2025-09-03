@@ -153,6 +153,9 @@ class MLBTransferAgent:
             env_url = os.getenv("MLB_MCP_SERVER_URL")
             if env_url:
                 return env_url
+            # 로컬 MCP 비활성화 시 외부 MCP URL 필요
+            if os.getenv("ENABLE_LOCAL_MCP", "").lower() in ("0", "false", "no", ""):
+                logger.warning("Local MCP is disabled. Set MLB_MCP_SERVER_URL to your external MCP endpoint.")
             # 우선순위 2: Vercel 배포 URL 자동 구성 (예: a2a-mlb-agent.vercel.app)
             vercel_host = os.getenv("VERCEL_URL")
             if vercel_host:

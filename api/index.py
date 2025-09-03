@@ -153,13 +153,17 @@ def build_a2a_app():
     logger.info("✅ A2A app built (executor attached)")
 
     try:
-        # MCP subapp 로딩 및 마운트
-        mcp_app = mount_local_mcp_subapp()
-        if mcp_app:
-            app.mount("/mlb", mcp_app)
-            logger.info("✅ MCP mounted at /mlb")
+        # Vercel 용량 제한 회피: 기본은 로컬 MCP 비활성화. 필요 시 ENABLE_LOCAL_MCP=true 설정
+        enable_local_mcp = os.getenv("ENABLE_LOCAL_MCP", "").lower() in ("1", "true", "yes")
+        if enable_local_mcp:
+            mcp_app = mount_local_mcp_subapp()
+            if mcp_app:
+                app.mount("/mlb", mcp_app)
+                logger.info("✅ MCP mounted at /mlb (local)")
+            else:
+                logger.warning("⚠️ MCP subapp을 찾지 못함 - /mlb 엔드포인트 비활성화")
         else:
-            logger.warning("⚠️ MCP subapp을 찾지 못함 - /mlb 엔드포인트 비활성화")
+            logger.info("ℹ️ Local MCP disabled (set ENABLE_LOCAL_MCP=true to enable)")
 
     except Exception as ie:
         logger.exception(f"❌ MCP subapp import failed: {ie}")
