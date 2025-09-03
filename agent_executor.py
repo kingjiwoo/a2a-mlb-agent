@@ -345,10 +345,11 @@ class MLBTransferAgent:
             logger.info("create_react_agent 실행 중...")
             target = self.agent_with_memory or self.agent
             response = await target.ainvoke(
-                {"messages": [("user", enhanced_message)]},
+                {"messages": [HumanMessage(content=enhanced_message)]},
                 config={"configurable": {"session_id": session_id or "default"}},
             )
             
+            # LangGraph create_react_agent returns a dict with "messages"
             result = response["messages"][-1].content
             logger.info("에이전트 응답 생성 완료")
             return result
