@@ -148,34 +148,37 @@ class MLBTransferAgent:
         
         # MCP 클라이언트 초기화
         # Vercel 환경에서는 퍼블릭 URL을 기준으로 자체 마운트된 MCP 엔드포인트(/mlb/mcp/)로 연결
-        def _default_mcp_url() -> str:
-            # 우선순위 1: 명시적 환경변수
+        def _resolve_mcp_url() -> Optional[str]:
+            # 1) 외부 엔드포인트가 지정된 경우 최우선
             env_url = os.getenv("MLB_MCP_SERVER_URL")
             if env_url:
                 return env_url
-            # 로컬 MCP 비활성화 시 외부 MCP URL 필요
-            if os.getenv("ENABLE_LOCAL_MCP", "").lower() in ("0", "false", "no", ""):
-                logger.warning("Local MCP is disabled. Set MLB_MCP_SERVER_URL to your external MCP endpoint.")
-            # 우선순위 2: Vercel 배포 URL 자동 구성 (예: a2a-mlb-agent.vercel.app)
-            vercel_host = os.getenv("VERCEL_URL")
-            if vercel_host:
-                scheme = "https://"
-                # VERCEL_URL 값이 이미 스킴을 포함한다면 중복 방지
-                if vercel_host.startswith("http://") or vercel_host.startswith("https://"):
-                    base = vercel_host
-                else:
-                    base = f"{scheme}{vercel_host}"
-                return f"{base}/mlb/mcp"
-            # 로컬 개발 기본값
-            return "http://localhost:8000/mlb/mcp"
+            # 2) 로컬 MCP를 사용할지 여부
+            enable_local = os.getenv("ENABLE_LOCAL_MCP", "").lower() in ("1", "true", "yes")
+            if enable_local:
+                vercel_host = os.getenv("VERCEL_URL")
+                if vercel_host:
+                    if vercel_host.startswith("http://") or vercel_host.startswith("https://"):
+                        base = vercel_host
+                    else:
+                        base = f"https://{vercel_host}"
+                    return f"{base}/mlb/mcp"
+                # 로컬 개발 시
+                return "http://localhost:8000/mlb/mcp"
+            # 3) 그 외에는 비활성화
+            logger.info("MCP disabled (no MLB_MCP_SERVER_URL and ENABLE_LOCAL_MCP is false)")
+            return None
 
-        mcp_url = _default_mcp_url()
-        if not mcp_url.endswith('/'):
-            mcp_url += "/"
-        logger.info(f"MCP URL resolved: {mcp_url}")
-        self.mcp_client = MultiServerMCPClient({
-            "mlb": {"transport": "streamable_http", "url": mcp_url}
-        })
+        mcp_url = _resolve_mcp_url()
+        if mcp_url:
+            if not mcp_url.endswith('/'):
+                mcp_url += "/"
+            logger.info(f"MCP URL resolved: {mcp_url}")
+            self.mcp_client = MultiServerMCPClient({
+                "mlb": {"transport": "streamable_http", "url": mcp_url}
+            })
+        else:
+            self.mcp_client = None
         
         # 프롬프트 로드
         self.prompts = self._load_prompts()
@@ -232,6 +235,10 @@ class MLBTransferAgent:
                 return
             try:
                 logger.info("MCP 연결 및 툴 로드 시작...")
+                if not self.mcp_client:
+                    logger.info("MCP 비활성화 상태 - 툴 없이 진행")
+                    self.tools = []
+                    return
                 # 연결 (너무 오래 붙잡지 않도록 짧은 타임아웃)
                 try:
                     # 일부 구현은 명시적 연결이 필요 없으므로, 메서드가 없으면 건너뛰고 계속 진행
@@ -359,7 +366,7 @@ class MLBTransferAgent:
             logger.info("create_react_agent 실행 중...")
             target = self.agent_with_memory or self.agent
             response = await target.ainvoke(
-                {"messages": [HumanMessage(content=enhanced_message)]},
+                {"messages": [("user", enhanced_message)]},
                 config={"configurable": {"session_id": session_id or "default"}},
             )
             
