@@ -28,3 +28,4 @@ python-dotenv
 httpx
 a2a
 redis>=5.0.0
+pybaseball>=2.2.7
