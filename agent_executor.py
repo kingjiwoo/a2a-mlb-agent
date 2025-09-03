@@ -317,8 +317,19 @@ class MLBTransferAgent:
         
         # 메모리 래퍼 구성
         def get_session_history(config) -> BaseChatMessageHistory:
-            cfg = (config or {}).get("configurable") or {}
-            session_id = cfg.get("session_id") or "default"
+            # config가 dict가 아닐 수도 있음에 대비하여 방어적으로 처리
+            session_id = "default"
+            try:
+                if isinstance(config, dict):
+                    cfg = config.get("configurable") or {}
+                    if isinstance(cfg, dict):
+                        session_id = cfg.get("session_id") or session_id
+                else:
+                    cfg = getattr(config, "configurable", None)
+                    if isinstance(cfg, dict):
+                        session_id = cfg.get("session_id") or session_id
+            except Exception:
+                pass
             return self._memory_store.get_history(session_id)
 
         self.agent_with_memory = RunnableWithMessageHistory(

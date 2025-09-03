@@ -8,13 +8,21 @@ from fastmcp import FastMCP
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 
-# try:
-#     from generic_api import setup_generic_tools
-#     from mlb_api import setup_mlb_tools
-# except ImportError:
-#     # 패키지 컨텍스트일 때
-from .generic_api import setup_generic_tools
-from .mlb_api import setup_mlb_tools
+# 패키지/환경에 따라 상대/절대 import 모두 지원
+try:
+    from .generic_api import setup_generic_tools  # packaged path
+    from .mlb_api import setup_mlb_tools
+except Exception:
+    # fallback: 하이픈(-)이 포함된 폴더에서 모듈 직접 로드
+    import sys
+    from pathlib import Path
+    alt = Path(__file__).resolve().parents[2] / "mlb_agent" / "mlb-api-mcp"
+    if str(alt) not in sys.path:
+        sys.path.insert(0, str(alt))
+    import generic_api as _generic_api  # type: ignore
+    import mlb_api as _mlb_api  # type: ignore
+    setup_generic_tools = _generic_api.setup_generic_tools
+    setup_mlb_tools = _mlb_api.setup_mlb_tools
 
 # Suppress websockets deprecation warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
